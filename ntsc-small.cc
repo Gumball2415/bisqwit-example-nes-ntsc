@@ -5,6 +5,8 @@
 #include <vector>
 #include <algorithm>
 #include <cstdio>
+#define _USE_MATH_DEFINES
+#include <math.h>
 
 namespace
 {
@@ -195,49 +197,11 @@ namespace
     /* End PNG encoder. */
 
     // Define the NTSC voltage levels corresponding to each of the four different pixel colors.
-    // terminated composite levels, from https://forums.nesdev.org/viewtopic.php?p=159266#p159266
-    // normalized via the equation:
-    // (COMPOSITE_LEVELS - NTSC_BLACK) / (NTSC_WHITE - NTSC_BLACK);
     static const float Voltages[16] = {
-       -0.10659898477157359,  0.00000000000000000, 0.30456852791878175, 0.72081218274111680,  // Signal low
-        0.38578680203045684,  0.67005076142131981, 1.00000000000000000, 1.00000000000000000,  // Signal high
-       -0.15228426395939085, -0.07106598984771573, 0.17258883248730966, 0.50761421319796951,  // Signal low, attenuated
-        0.23857868020304568,  0.46192893401015234, 0.74111675126903565, 0.74111675126903565,  // Signal high, attenuated
-    };
-
-    // sine LUTs specifically made for QAM demodulation
-    // factor of 2 is applied to the LUTs for correct saturation
-    // https://www.nesdev.org/wiki/NTSC_video#Decoding_chroma_information_(UV)
-    static const float sin_table[12] = {
-        // =SIN(PI() * (PHASE + 3 - 0.5) / 6) * 2
-        1.9318516525781366,
-        1.9318516525781366,
-        1.4142135623730951,
-        0.517638090205042,
-       -0.5176380902050416,
-       -1.4142135623730943,
-       -1.9318516525781366,
-       -1.9318516525781368,
-       -1.4142135623730954,
-       -0.5176380902050431,
-        0.5176380902050421,
-        1.4142135623730947,
-    };
-
-    static const float cos_table[12] = {
-        // =COS(PI() * (PHASE + 3 - 0.5) / 6) * 2
-        0.5176380902050415,
-       -0.5176380902050413,
-       -1.414213562373095,
-       -1.9318516525781364,
-       -1.9318516525781366,
-       -1.4142135623730958,
-       -0.5176380902050413,
-        0.5176380902050406,
-        1.4142135623730947,
-        1.9318516525781362,
-        1.9318516525781364,
-        1.4142135623730954,
+        0.228f, 0.312f, 0.552f, 0.880f, // Signal low
+        0.616f, 0.840f, 1.100f, 1.100f, // Signal high
+        0.192f, 0.256f, 0.448f, 0.712f, // Signal low, attenuated
+        0.500f, 0.676f, 0.896f, 0.896f  // Signal high, attenuated
     };
 }
 
@@ -255,6 +219,25 @@ int main(int argc, char** argv)
 
     std::vector<unsigned char> rgbdata;
     rgbdata.resize( output_width*output_height*3 );
+
+    // terminated composite levels, from https://forums.nesdev.org/viewtopic.php?p=159266#p159266
+    // normalized via the equation:
+    // (COMPOSITE_LEVELS - NTSC_BLACK) / (NTSC_WHITE - NTSC_BLACK);
+    static float levels[16];
+    for (int i = 0; i < 16; ++i)
+    {
+        levels[i] = (Voltages[i] - Voltages[1]) / (Voltages[6] - Voltages[1]);
+    }
+
+    // sine LUTs specifically made for QAM demodulation
+    // factor of 2 is applied to the LUTs for correct saturation
+    // https://www.nesdev.org/wiki/NTSC_video#Decoding_chroma_information_(UV)
+    static float sin_table[12], cos_table[12];
+    for (int p = 0; p < 12; ++p)
+    {
+        sin_table[p] = std::sin(M_PI * (p + 3.f - 0.5f) / 6) * 2.f;
+        cos_table[p] = std::cos(M_PI * (p + 3.f - 0.5f) / 6) * 2.f;
+    }
 
     // The NTSC signal decoder maintains a buffer of previous values.
     const float Saturation = std::atoi(argv[3]) != 0 ? 1.f : 0.f;
@@ -299,8 +282,8 @@ int main(int argc, char** argv)
                 ||  ((emphasis & 4) && InColorPhase(0x8)) && (color < 0xE)) ? 8 : 0;
 
                 // The square wave for this color alternates between these two voltages:
-                float low  = Voltages[0 + level + attenuation];
-                float high = Voltages[4 + level + attenuation];
+                float low  = levels[0 + level + attenuation];
+                float high = levels[4 + level + attenuation];
                 if(color == 0) { low = high; } // For color 0, only high level is emitted
                 if(color > 12) { high = low; } // For colors 13..15, only low level is emitted
                 float sample = InColorPhase(color) ? high : low;
@@ -317,7 +300,6 @@ int main(int argc, char** argv)
                 // only keeping track of the magnitudes of deltas between signal level changes.
                 SumY += spot1;
 
-                // precalculated the std::cos() values into a small compile-time constant array
                 SumU += spot2 * sin_table[DecodePhase % 12] * Saturation;
                 SumV += spot2 * cos_table[DecodePhase % 12] * Saturation;
                 // Done decoding NTSC signal: It has been decomposed into Y, U and V.
