@@ -1,5 +1,9 @@
-// modified from https://bisqwit.iki.fi/jutut/kuvat/programming_examples/nesemu1/ntsc-small.cc
-// by Persune 2024
+// Emulating NES composite NTSC in C++ code
+// Copyright 2011 Bisqwit
+// Modifications by Persune 2024
+// from https://bisqwit.iki.fi/jutut/kuvat/programming_examples/nesemu1/ntsc-small.cc
+// licensed under Creative Commons Attribution-ShareAlike 4.0 International.
+// To view a copy of this license, visit https://creativecommons.org/licenses/by-sa/4.0/
 
 #include <cmath>
 #include <vector>
@@ -197,6 +201,7 @@ namespace
     /* End PNG encoder. */
 
     // Define the NTSC voltage levels corresponding to each of the four different pixel colors.
+    // from https://forums.nesdev.org/viewtopic.php?p=159266#p159266
     static const float Voltages[16] = {
         0.228f, 0.312f, 0.552f, 0.880f, // Signal low
         0.616f, 0.840f, 1.100f, 1.100f, // Signal high
@@ -220,7 +225,6 @@ int main(int argc, char** argv)
     std::vector<unsigned char> rgbdata;
     rgbdata.resize( output_width*output_height*3 );
 
-    // terminated composite levels, from https://forums.nesdev.org/viewtopic.php?p=159266#p159266
     // normalized via the equation:
     // (COMPOSITE_LEVELS - NTSC_BLACK) / (NTSC_WHITE - NTSC_BLACK);
     static float levels[16];
@@ -231,17 +235,24 @@ int main(int argc, char** argv)
 
     // sine LUTs specifically made for QAM demodulation
     // factor of 2 is applied to the LUTs for correct saturation
-    // https://www.nesdev.org/wiki/NTSC_video#Decoding_chroma_information_(UV)
+    // https://www.nesdev.org/wiki/NTSC_video#Chroma_saturation_correction
+
+	// SMPTE 170M-2004, page 5, section 8.2
+	// value of 40 IRE based on colorburst p-p amplitude defined in
+	// SMPTE 170M-2004, page 8, Table 1
+	// chroma_saturation_correction = colorburst_reference_pp/colorburst_ppu_pp
+	static float chroma_saturation_correction = 2.f * (40.f / 140.f) / (0.524 - 0.148);
+
     static float sin_table[12], cos_table[12];
     for (int p = 0; p < 12; ++p)
     {
-        sin_table[p] = std::sin(M_PI * (p + 3.f - 0.5f) / 6) * 2.f;
-        cos_table[p] = std::cos(M_PI * (p + 3.f - 0.5f) / 6) * 2.f;
+        sin_table[p] = std::sin(M_PI * (p + 3.f - 0.5f) / 6) * chroma_saturation_correction;
+        cos_table[p] = std::cos(M_PI * (p + 3.f - 0.5f) / 6) * chroma_saturation_correction;
     }
 
     // The NTSC signal decoder maintains a buffer of previous values.
     const float Saturation = std::atoi(argv[3]) != 0 ? 1.f : 0.f;
-    const unsigned SignalBufferWidth = 12, YtuningQuality = 0, IQtuningQuality = 0, SignalsPerPixel = std::atoi(argv[2]);
+    const unsigned SignalBufferWidth = 12, YtuningQuality = 0, UVtuningQuality = 0, SignalsPerPixel = std::atoi(argv[2]);
     float SignalHistory[SignalBufferWidth]{}, SumY = 0.f, SumU = 0.f, SumV = 0.f;
 
     // Initial phase value for this frame.
@@ -292,7 +303,7 @@ int main(int argc, char** argv)
 
                 // Begin decoding the NTSC signal!
                 float oldspot1 = SignalHistory[(DecodePhase + SignalBufferWidth - YtuningQuality) % SignalBufferWidth];
-                float oldspot2 = SignalHistory[(DecodePhase + SignalBufferWidth - IQtuningQuality) % SignalBufferWidth];
+                float oldspot2 = SignalHistory[(DecodePhase + SignalBufferWidth - UVtuningQuality) % SignalBufferWidth];
                 SignalHistory[DecodePhase] = sample;
                 float spot1 = sample - oldspot1;
                 float spot2 = sample - oldspot2;
