@@ -236,12 +236,14 @@ int main(int argc, char** argv)
     // sine LUTs specifically made for QAM demodulation
     // factor of 2 is applied to the LUTs for correct saturation
     // https://www.nesdev.org/wiki/NTSC_video#Chroma_saturation_correction
+	static float chroma_saturation_correction = 2.f;
 
+	// Optional:
 	// SMPTE 170M-2004, page 5, section 8.2
 	// value of 40 IRE based on colorburst p-p amplitude defined in
 	// SMPTE 170M-2004, page 8, Table 1
 	// chroma_saturation_correction = colorburst_reference_pp/colorburst_ppu_pp
-	static float chroma_saturation_correction = 2.f * (40.f / 140.f) / (0.524 - 0.148);
+	// chroma_saturation_correction *=  * (40.f / 140.f) / (0.524 - 0.148);
 
     static float sin_table[12], cos_table[12];
     for (int p = 0; p < 12; ++p)
