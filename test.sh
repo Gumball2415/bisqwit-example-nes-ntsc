@@ -1,8 +1,8 @@
 make
 ./ntsc-small 0 12 1 256 240 Nes_ntsc_perpixel_small.png
-./ntsc-small 0 8 1 2048 240 Nes_ntsc_perscanline_0.png
-./ntsc-small 4 8 1 2048 240 Nes_ntsc_perscanline_1.png
-./ntsc-small 8 8 1 2048 240 Nes_ntsc_perscanline_2.png
+./ntsc-small 0 8 1 2048 1920 Nes_ntsc_perscanline_0.png
+./ntsc-small 4 8 1 2048 1920 Nes_ntsc_perscanline_1.png
+./ntsc-small 8 8 1 2048 1920 Nes_ntsc_perscanline_2.png
 ./ntsc-small 0 12 0 256 240 Nes_ntsc_perpixel_small_bw.png
 ./ntsc-small 0 8 1 256 240 Nes_ntsc_perscanline_small_0.png
 ./ntsc-small 4 8 1 256 240 Nes_ntsc_perscanline_small_1.png

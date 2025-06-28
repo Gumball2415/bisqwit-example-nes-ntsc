@@ -24,7 +24,7 @@ A modification of an NES composite filter for demonstration in the NESDev wiki.
 
 [ntsc-small.cc](https://bisqwit.iki.fi/jutut/kuvat/programming_examples/nesemu1/ntsc-small.cc) © 2011 Bisqwit.
 
-modifications © 2024 Persune.
+modifications © 2025 Persune.
 
 Shield: [![CC BY-SA 4.0][cc-by-sa-shield]][cc-by-sa]
 

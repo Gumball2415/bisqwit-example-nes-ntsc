@@ -1,6 +1,6 @@
 // Emulating NES composite NTSC in C++ code
 // Copyright 2011 Bisqwit
-// Modifications by Persune 2024
+// Modifications by Persune 2025
 // from https://bisqwit.iki.fi/jutut/kuvat/programming_examples/nesemu1/ntsc-small.cc
 // licensed under Creative Commons Attribution-ShareAlike 4.0 International.
 // To view a copy of this license, visit https://creativecommons.org/licenses/by-sa/4.0/
@@ -11,6 +11,8 @@
 #include <cstdio>
 #define _USE_MATH_DEFINES
 #include <math.h>
+#include <cstdint>
+#include <fstream>
 
 namespace
 {
@@ -225,40 +227,39 @@ int main(int argc, char** argv)
     std::vector<unsigned char> rgbdata;
     rgbdata.resize( output_width*output_height*3 );
 
-    // normalized via the equation:
-    // (COMPOSITE_LEVELS - NTSC_BLACK) / (NTSC_WHITE - NTSC_BLACK);
-    static float levels[16];
-    for (int i = 0; i < 16; ++i)
-    {
-        levels[i] = (Voltages[i] - Voltages[1]) / (Voltages[6] - Voltages[1]);
-    }
+    // Export the testcard image for debugging.
+    std::ofstream RawPPUFrameOutput("ppubuf.bin", std::fstream::binary);
+
+    const float Saturation = std::atoi(argv[3]) != 0 ? 1.f : 0.f;
 
     // sine LUTs specifically made for QAM demodulation
     // factor of 2 is applied to the LUTs for correct saturation
     // https://www.nesdev.org/wiki/NTSC_video#Chroma_saturation_correction
-	static float chroma_saturation_correction = 2.f;
-
-	// Optional:
-	// SMPTE 170M-2004, page 5, section 8.2
-	// value of 40 IRE based on colorburst p-p amplitude defined in
-	// SMPTE 170M-2004, page 8, Table 1
-	// chroma_saturation_correction = colorburst_reference_pp/colorburst_ppu_pp
-	// chroma_saturation_correction *=  * (40.f / 140.f) / (0.524 - 0.148);
+	static float ChromaSaturationCorrect = 2.f * Saturation;
 
     static float sin_table[12], cos_table[12];
     for (int p = 0; p < 12; ++p)
     {
-        sin_table[p] = std::sin(M_PI * (p + 3.f - 0.5f) / 6) * chroma_saturation_correction;
-        cos_table[p] = std::cos(M_PI * (p + 3.f - 0.5f) / 6) * chroma_saturation_correction;
+        sin_table[p] = std::sin(M_PI * (p + 3.f - 0.5f) / 6) * ChromaSaturationCorrect;
+        cos_table[p] = std::cos(M_PI * (p + 3.f - 0.5f) / 6) * ChromaSaturationCorrect;
     }
 
-    // The NTSC signal decoder maintains a buffer of previous values.
-    const float Saturation = std::atoi(argv[3]) != 0 ? 1.f : 0.f;
+    // This controls the filter width.
     const unsigned SignalBufferWidth = 12, YtuningQuality = 0, UVtuningQuality = 0, SignalsPerPixel = std::atoi(argv[2]);
+
+    // The NTSC signal decoder maintains a buffer of previous values.
     float SignalHistory[SignalBufferWidth]{}, SumY = 0.f, SumU = 0.f, SumV = 0.f;
 
     // Initial phase value for this frame.
     unsigned DecodePhase = std::atoi(argv[1]) % SignalBufferWidth;
+
+    // normalized via the equation:
+    // ((COMPOSITE_LEVELS - NTSC_BLACK) / (NTSC_WHITE - NTSC_BLACK)) / SignalBufferWidth;
+    static float levels[16];
+    for (int i = 0; i < 16; ++i)
+    {
+        levels[i] = ((Voltages[i] - Voltages[1]) / (Voltages[6] - Voltages[1])) / SignalBufferWidth;
+    }
 
     // Generate picture. 240 scanlines.
     for(unsigned y=0; y<240; ++y)
@@ -272,27 +273,31 @@ int main(int argc, char** argv)
         for(unsigned x=0; x<256; ++x)
         {
             // Retrieve current pixel color from the PPU.
-            unsigned pixel = TestCard(x,y);
+            uint16_t pixel = TestCard(x,y);
+
+            // Write the raw pixel to a binary buffer for debugging.
+            if (RawPPUFrameOutput) {
+                RawPPUFrameOutput.write(reinterpret_cast<char const*>(&pixel), sizeof(uint16_t));
+            }
 
             // Decode the NES color.
             int color = (pixel & 0x0F);    // 0..15 "cccc"
             int level = (pixel >> 4) & 3;  // 0..3  "ll"
             int emphasis = (pixel >> 6);   // 0..7  "eee"
-            if(color > 13) { level = 1;  } // For colors 14..15, level 1 is forced.
+            if(color > 13) { level = 1; } // For colors 14..15, level 1 is forced.
 
             // Now generate the SignalsPerPixel samples.
             for(unsigned n=0; n<SignalsPerPixel; ++n)
             {
-                if(!DecodePhase--) DecodePhase = SignalBufferWidth-1;
-
-                auto InColorPhase = [=](int color) { return (color + DecodePhase) % 12 < 6; }; // Inline function
+                auto InColorPhase = [&](int color) { return (color + DecodePhase) % 12 < 6; }; // Inline function
 
                 // When de-emphasis bits are set, some parts of the signal are attenuated:
                 // colors 14 .. 15 are not affected by de-emphasis
                 int attenuation = (
-                    ((emphasis & 1) && InColorPhase(0xC))
-                ||  ((emphasis & 2) && InColorPhase(0x4))
-                ||  ((emphasis & 4) && InColorPhase(0x8)) && (color < 0xE)) ? 8 : 0;
+                  (((emphasis & 1) && InColorPhase(0xC))
+                || ((emphasis & 2) && InColorPhase(0x4))
+                || ((emphasis & 4) && InColorPhase(0x8)))
+                && (color < 0xE)) ? 8 : 0;
 
                 // The square wave for this color alternates between these two voltages:
                 float low  = levels[0 + level + attenuation];
@@ -313,8 +318,8 @@ int main(int argc, char** argv)
                 // only keeping track of the magnitudes of deltas between signal level changes.
                 SumY += spot1;
 
-                SumU += spot2 * sin_table[DecodePhase % 12] * Saturation;
-                SumV += spot2 * cos_table[DecodePhase % 12] * Saturation;
+                SumU += spot2 * sin_table[DecodePhase % 12];
+                SumV += spot2 * cos_table[DecodePhase % 12];
                 // Done decoding NTSC signal: It has been decomposed into Y, U and V.
 
                 // Check if we need to render a pixel now.
@@ -325,9 +330,9 @@ int main(int argc, char** argv)
                     pixelcarry -= 256*SignalsPerPixel;
 
                     // Convert YUV into RGB:
-                    float r = (SumY + SumV * 1.139883f) / SignalBufferWidth;
-                    float g = (SumY - SumU * 0.394642f - SumV * 0.580622f) / SignalBufferWidth;
-                    float b = (SumY + SumU * 2.032062f) / SignalBufferWidth;
+                    float r = (SumY + SumV * 1.139883f);
+                    float g = (SumY - SumU * 0.394642f - SumV * 0.580622f);
+                    float b = (SumY + SumU * 2.032062f);
 
                     // Convert the float RGB into RGB24:
                     int rr = r*255; if(rr<0) rr=0; else if(rr>255) rr=255;
@@ -343,12 +348,19 @@ int main(int argc, char** argv)
                     }
                     ++hpos;
                 }
+                if(++DecodePhase > SignalBufferWidth-1) DecodePhase = 0;
             }
         }
+
+        // Account for the remaining phase offset in the scanline.
+        // There are 341 pixels in one scanline, so the phase gets offset by 4 samples.
+        // Accumulating with 256 pixels will reverse the edge sawtooth pattern, the phase offsets by 8 samples instead.
+        DecodePhase = (DecodePhase + (341-256)*SignalsPerPixel)%SignalBufferWidth;
+
         std::fill(std::begin(SignalHistory), std::end(SignalHistory), 0.f);
         SumY = SumU = SumV = 0.f;
     }
-
+    RawPPUFrameOutput.close();
     PNGencoder enc;
     enc.EncodeImage(output_width, output_height, &rgbdata[0]);
     enc.SaveTo(argv[6]);
