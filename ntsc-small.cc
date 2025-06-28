@@ -335,9 +335,9 @@ int main(int argc, char** argv)
                     float b = (SumY + SumU * 2.032062f);
 
                     // Convert the float RGB into RGB24:
-                    int rr = r*255; if(rr<0) rr=0; else if(rr>255) rr=255;
-                    int gg = g*255; if(gg<0) gg=0; else if(gg>255) gg=255;
-                    int bb = b*255; if(bb<0) bb=0; else if(bb>255) bb=255;
+                    int rr = std::round(r*255); if(rr<0) rr=0; else if(rr>255) rr=255;
+                    int gg = std::round(g*255); if(gg<0) gg=0; else if(gg>255) gg=255;
+                    int bb = std::round(b*255); if(bb<0) bb=0; else if(bb>255) bb=255;
 
                     // Save the RGB into the frame buffer. n_lines = number of times to duplicate that pixel vertically.
                     for(unsigned l=0; l<n_lines; ++l)
